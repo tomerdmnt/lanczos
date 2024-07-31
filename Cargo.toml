@@ -1,0 +1,15 @@
+[package]
+name = "lanczos"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+authors = ["tomer <tomer.dmnt@gmail.com>"]
+description = "lanczos algorithm for eigen decomposition"
+categories = [ "science", "math" ]
+keywords = [ "linear-algebra", "eigen", "eigenvalues", "eigenvectors", "nalgebra", "sparse", "nalgebra-sparse", "math"]
+repository = "https://github.com/tomerdmnt/lanczos"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+nalgebra = { version = "0.33.0", features = ["rand", "sparse"] }
+nalgebra-sparse = "0.10.0"
