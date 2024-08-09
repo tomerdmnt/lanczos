@@ -28,8 +28,10 @@
 //! ```
 mod hermitian;
 
+use std::fmt::Debug;
+
 pub use hermitian::Hermitian;
-use nalgebra::{DMatrix, DVector, Dyn, SymmetricEigen};
+use nalgebra::{ComplexField, DMatrix, DVector, Dyn, SymmetricEigen};
 
 #[derive(Copy, Clone)]
 pub enum Order {
@@ -39,17 +41,34 @@ pub enum Order {
 
 /// Eigen decomposition of an Hermitian matrix
 #[derive(Clone, Debug)]
-pub struct HermitianEigen {
+pub struct HermitianEigen<T>
+where
+    T: ComplexField + Copy,
+    T::RealField: num::Float,
+{
     /// Eigen values in order
-    pub eigenvalues: DVector<f64>,
+    pub eigenvalues: DVector<T::RealField>,
     /// Eigen vectors corresponding to the eigen values
-    pub eigenvectors: DMatrix<f64>,
+    pub eigenvectors: DMatrix<T>,
 }
 
-impl HermitianEigen {
-    pub fn new<H>(hermitian: &H, iterations: usize, order: Order, tolerance: f64) -> Self
+fn new_random_vector<T>(dim: usize) -> DVector<T>
+where
+    T: ComplexField + Copy,
+{
+    let v = DVector::<f64>::new_random(dim).normalize();
+
+    DVector::<T>::from_fn(dim, |i, _| num::FromPrimitive::from_f64(v[i]).unwrap())
+}
+
+impl<T> HermitianEigen<T>
+where
+    T: ComplexField + Copy,
+    T::RealField: num::Float,
+{
+    pub fn new<H>(hermitian: &H, iterations: usize, order: Order, tolerance: T::RealField) -> Self
     where
-        H: Hermitian + Sized,
+        H: Hermitian<T> + Sized,
     {
         assert!(
             hermitian.is_square(),
@@ -61,18 +80,17 @@ impl HermitianEigen {
         // iterations must not be larger from the matrix's dimension
         let iterations = std::cmp::min(iterations, hermitian.ncols());
 
-        let mut alpha = DVector::<f64>::zeros(iterations);
-        let mut beta = DVector::<f64>::zeros(iterations - 1);
+        let mut alpha = DVector::<T>::zeros(iterations);
+        let mut beta = DVector::<T::RealField>::zeros(iterations - 1);
 
-        let mut vs = DMatrix::<f64>::zeros(hermitian.nrows(), iterations);
-        let v0 = DVector::<f64>::new_random(hermitian.nrows()).normalize();
+        let mut vs = DMatrix::<T>::zeros(hermitian.nrows(), iterations);
+        let v0 = new_random_vector(hermitian.nrows());
 
         vs.set_column(0, &v0);
 
-        let mut w_prime = hermitian.vector_product(vs.column(0));
-        // alpha[0] = w_prime.conjugate().dot(&v0); // TODO: complex
-        alpha[0] = w_prime.dot(&v0);
-        let mut w = w_prime - alpha[0] * &v0;
+        let w_prime = hermitian.vector_product(vs.column(0));
+        alpha[0] = w_prime.conjugate().dot(&v0);
+        let mut w = &w_prime - v0 * alpha[0];
 
         for i in 1..iterations {
             beta[i - 1] = w.norm();
@@ -81,9 +99,9 @@ impl HermitianEigen {
             } else {
                 // find a random orthogonal vector
                 for j in 0..i {
-                    w = DVector::<f64>::new_random(hermitian.nrows());
+                    let mut w = new_random_vector(hermitian.nrows());
                     let projection = w.dot(&vs.column(j));
-                    w -= projection * vs.column(j)
+                    w -= vs.column(j) * projection;
                 }
 
                 if w.norm() > tolerance {
@@ -93,15 +111,18 @@ impl HermitianEigen {
                 }
             }
 
-            w_prime = hermitian.vector_product(vs.column(i));
-            // alpha[i] = w_prime.conjugate().dot(&vs.column(i)); // TODO: complex
+            let w_prime = hermitian.vector_product(vs.column(i));
+            alpha[i] = w_prime.conjugate().dot(&vs.column(i));
             alpha[i] = w_prime.dot(&vs.column(i));
-            w = w_prime - alpha[i] * vs.column(i) - beta[i - 1] * vs.column(i - 1);
+            w = &w_prime
+                - vs.column(i) * alpha[i]
+                - vs.column(i - 1)
+                    .map(|x| x * ComplexField::from_real(beta[i - 1]));
 
             // orthogonalize to previous vectors
             for j in 0..i {
                 let projection = w.dot(&vs.column(j));
-                w -= projection * vs.column(j)
+                w -= vs.column(j) * projection;
             }
         }
 
@@ -120,25 +141,36 @@ impl HermitianEigen {
     }
 }
 
-fn construct_tridiagonal(alpha: DVector<f64>, beta: DVector<f64>) -> DMatrix<f64> {
+fn construct_tridiagonal<T>(alpha: DVector<T>, beta: DVector<T::RealField>) -> DMatrix<T>
+where
+    T: ComplexField + Copy,
+    T::RealField: num::Float,
+{
     // construct tridiagonal
     let dim = alpha.len();
-    DMatrix::<f64>::from_fn(dim, dim, |i, j| {
+    DMatrix::<T>::from_fn(dim, dim, |i, j| {
         if i == j {
             alpha[i]
         } else if i == j + 1 {
-            beta[j]
+            ComplexField::from_real(beta[j])
         } else if j == i + 1 {
-            beta[i]
+            ComplexField::from_real(beta[i])
         } else {
-            0.0
+            T::zero()
         }
     })
 }
 
-fn sort_eigenpairs(eig: &SymmetricEigen<f64, Dyn>, order: Order) -> (DVector<f64>, DMatrix<f64>) {
+fn sort_eigenpairs<T>(
+    eig: &SymmetricEigen<T, Dyn>,
+    order: Order,
+) -> (DVector<T::RealField>, DMatrix<T>)
+where
+    T: ComplexField,
+    T::RealField: num::Float + Copy,
+{
     let dim = eig.eigenvalues.len();
-    let mut eigvalues_index: Vec<(usize, f64)> =
+    let mut eigvalues_index: Vec<(usize, T::RealField)> =
         eig.eigenvalues.iter().copied().enumerate().collect();
 
     match order {
@@ -146,15 +178,17 @@ fn sort_eigenpairs(eig: &SymmetricEigen<f64, Dyn>, order: Order) -> (DVector<f64
         Order::Largest => eigvalues_index.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()),
     }
 
-    let mut sorted_eigenvectors = DMatrix::<f64>::zeros(dim, dim);
+    let mut sorted_eigenvectors = DMatrix::<T>::zeros(dim, dim);
 
     eigvalues_index
         .iter()
         .enumerate()
         .for_each(|(i, (j, _))| sorted_eigenvectors.set_column(i, &eig.eigenvectors.column(*j)));
 
-    let sorted_eigenvalues =
-        DVector::<f64>::from_iterator(dim, eigvalues_index.iter().map(|(_, v)| v).copied());
+    let sorted_eigenvalues = DVector::<T::RealField>::from_iterator(
+        dim,
+        eigvalues_index.iter().map(|(_, v)| v).copied(),
+    );
 
     (sorted_eigenvalues, sorted_eigenvectors)
 }

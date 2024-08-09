@@ -1,12 +1,16 @@
-use nalgebra::{DMatrix, DVector, DVectorView};
+use nalgebra::{ComplexField, DMatrix, DVector, DVectorView, RealField};
 use nalgebra_sparse::{CscMatrix, CsrMatrix};
 
 use crate::{HermitianEigen, Order};
 
-pub trait Hermitian: Sized {
+pub trait Hermitian<T>: Sized
+where
+    T: ComplexField + Copy,
+    T::RealField: num::Float,
+{
     fn nrows(&self) -> usize;
     fn ncols(&self) -> usize;
-    fn vector_product(&self, v: DVectorView<f64>) -> DVector<f64>;
+    fn vector_product(&self, v: DVectorView<T>) -> DVector<T>;
 
     fn is_square(&self) -> bool {
         self.nrows() == self.ncols()
@@ -31,12 +35,16 @@ pub trait Hermitian: Sized {
     /// let eigenval = eigen.eigenvalues[0];
     /// let eigenvec = eigen.eigenvectors.column(0);
     ///  ```
-    fn eigsh(&self, iterations: usize, order: Order) -> HermitianEigen {
-        HermitianEigen::new(self, iterations, order, f64::EPSILON)
+    fn eigsh(&self, iterations: usize, order: Order) -> HermitianEigen<T> {
+        HermitianEigen::<T>::new(self, iterations, order, RealField::min_value().unwrap())
     }
 }
 
-impl Hermitian for DMatrix<f64> {
+impl<T> Hermitian<T> for DMatrix<T>
+where
+    T: ComplexField + Copy,
+    T::RealField: num::Float,
+{
     fn nrows(&self) -> usize {
         self.nrows()
     }
@@ -45,12 +53,16 @@ impl Hermitian for DMatrix<f64> {
         self.ncols()
     }
 
-    fn vector_product(&self, v: DVectorView<f64>) -> DVector<f64> {
+    fn vector_product(&self, v: DVectorView<T>) -> DVector<T> {
         self * v
     }
 }
 
-impl Hermitian for CscMatrix<f64> {
+impl<T> Hermitian<T> for CscMatrix<T>
+where
+    T: ComplexField + Copy,
+    T::RealField: Copy + num::Float,
+{
     fn nrows(&self) -> usize {
         self.nrows()
     }
@@ -59,12 +71,16 @@ impl Hermitian for CscMatrix<f64> {
         self.ncols()
     }
 
-    fn vector_product(&self, v: DVectorView<f64>) -> DVector<f64> {
+    fn vector_product(&self, v: DVectorView<T>) -> DVector<T> {
         self * v
     }
 }
 
-impl Hermitian for CsrMatrix<f64> {
+impl<T> Hermitian<T> for CsrMatrix<T>
+where
+    T: ComplexField + Copy,
+    T::RealField: Copy + num::Float,
+{
     fn nrows(&self) -> usize {
         self.nrows()
     }
@@ -73,7 +89,7 @@ impl Hermitian for CsrMatrix<f64> {
         self.ncols()
     }
 
-    fn vector_product(&self, v: DVectorView<f64>) -> DVector<f64> {
+    fn vector_product(&self, v: DVectorView<T>) -> DVector<T> {
         self * v
     }
 }
